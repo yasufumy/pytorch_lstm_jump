@@ -5,7 +5,7 @@ from torch import optim
 
 from torchtext import data
 from torchtext import datasets
-from torchtext.vocab import FastText
+from utils import get_word2vec
 
 from model import LSTMJump
 
@@ -54,15 +54,16 @@ def main(args):
 
     train, test = datasets.IMDB.splits(TEXT, LABEL)
 
-    TEXT.build_vocab(train, vectors=FastText())
+    TEXT.build_vocab(train)
     LABEL.build_vocab(train)
 
     train_iter, test_iter = data.BucketIterator.splits(
-        (train, test), batch_sizes=(args.batch, args.batch), device=args.gpu, repeat=False)
+        (train, test), batch_sizes=(args.batch, args.batch * 4), device=args.gpu, repeat=False)
 
-    model = LSTMJump(len(TEXT.vocab), 300, 128, len(LABEL.vocab), args.N, args.K, args.R)
+    model = LSTMJump(len(TEXT.vocab), 300, 128, len(LABEL.vocab), args.R, args.K, args.N)
     model.setup_test(8, 80)
-    model.set_embedding(TEXT.vocab.vectors)
+    model.load_pretrained_embedding(
+        get_word2vec(TEXT.vocab.itos, '.vector_cache/GoogleNews-vectors-negative300.bin'))
     model.cuda(args.gpu)
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
 

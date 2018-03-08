@@ -60,8 +60,8 @@ def main(args):
     train_iter, test_iter = data.BucketIterator.splits(
         (train, test), batch_sizes=(args.batch, args.batch * 4), device=args.gpu, repeat=False)
 
-    model = LSTMJump(len(TEXT.vocab), 300, 128, len(LABEL.vocab), args.R, args.K, args.N)
-    model.setup_test(8, 80)
+    model = LSTMJump(len(TEXT.vocab), 300, 128, len(LABEL.vocab),
+                     args.R, args.K, args.N, 80, 8)
     model.load_pretrained_embedding(
         get_word2vec(TEXT.vocab.itos, '.vector_cache/GoogleNews-vectors-negative300.bin'))
     model.cuda(args.gpu)

@@ -7,7 +7,7 @@ from torch.distributions import Categorical
 
 class LSTMJump(nn.Module):
     def __init__(self, vocab_size, embed_size, hidden_size, categories,
-                 R=20, K=40, N=5):
+                 R=20, K=40, N=5, R_test=80, N_test=8):
         super().__init__()
         self.embed = nn.Embedding(vocab_size, embed_size)
         self.lstm = nn.LSTM(embed_size, hidden_size)
@@ -17,26 +17,21 @@ class LSTMJump(nn.Module):
         self.nll_loss = nn.NLLLoss()
         self.mse_loss = nn.MSELoss(size_average=False)
         self.hidden_size = hidden_size
-        self.N = N
-        self._N_train = N
-        self.R = R
         self._R_train = R
+        self._R_test = R_test
+        self._N_train = N
+        self._N_test = N_test
+
+    @property
+    def R(self):
+        return self._R_train if self.training else self._R_test
+
+    @property
+    def N(self):
+        return self._N_train if self.training else self._N_test
 
     def load_pretrained_embedding(self, embedding):
         self.embed.weight = nn.Parameter(embedding)
-
-    def setup_test(self, N, R):
-        self._N_test = N
-        self._R_test = R
-
-    def train(self, mode=True):
-        self = super().train(mode)
-        self.N = self._N_train if mode else self._N_test
-        self.R = self._R_train if mode else self._R_test
-        return self
-
-    def eval(self):
-        return self.train(False)
 
     def forward(self, xs, t):
         max_length, batch_size = xs.size()

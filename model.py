@@ -7,7 +7,7 @@ from torch.distributions import Categorical
 
 class LSTMJump(nn.Module):
     def __init__(self, vocab_size, embed_size, hidden_size, categories,
-                 N, K, R):
+                 R=20, K=40, N=5):
         super().__init__()
         self.embed = nn.Embedding(vocab_size, embed_size)
         self.lstm = nn.LSTM(embed_size, hidden_size)
@@ -22,8 +22,8 @@ class LSTMJump(nn.Module):
         self.R = R
         self._R_train = R
 
-    def set_embedding(self, tensor):
-        self.embed.weight.data.copy_(tensor)
+    def load_pretrained_embedding(self, embedding):
+        self.embed.weight = nn.Parameter(embedding)
 
     def setup_test(self, N, R):
         self._N_test = N

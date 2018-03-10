@@ -79,7 +79,7 @@ def main(args):
             torch.nn.utils.clip_grad_norm(model.parameters(), 1.)
             optimizer.step()
             sum_loss += loss.data[0]
-        print('Loss: {}'.format(sum_loss / len(train_iter)))
+        print(f'Loss: {sum_loss / len(train_iter)}')
         sum_correct = 0
         total = 0
         model.eval()
@@ -89,8 +89,8 @@ def main(args):
             total += batch.label.size(0)
         accuracy = (sum_correct / total).data[0]
         max_accuracy = max(accuracy, max_accuracy)
-        print('Accuracy: {}'.format(accuracy))
-    print('Max Accuracy: {}'.format(max_accuracy))
+        print(f'Accuracy: {accuracy}')
+    print(f'Max Accuracy: {max_accuracy}')
 
 
 if __name__ == '__main__':

@@ -1,8 +1,11 @@
+from operator import setitem
+
 import torch
 from torch import nn
 from torch.nn import functional
 from torch.autograd import Variable
 from torch.distributions import Categorical
+from torch.nn.utils.rnn import pack_padded_sequence
 
 
 class LSTM(nn.Module):
@@ -17,17 +20,21 @@ class LSTM(nn.Module):
     def load_pretrained_embedding(self, embedding):
         self.embed.weight = nn.Parameter(embedding)
 
-    def forward(self, xs, t):
+    def forward(self, xs, lengths, t):
         _, batch_size = xs.size()
         embs = functional.dropout(self.embed(xs), 0.1)
-        hs, (h, c) = self.lstm(embs)
+        lengths = lengths.view(-1).tolist()
+        packed_embs = pack_padded_sequence(embs, lengths)
+        hs, (h, c) = self.lstm(packed_embs)
         y = functional.log_softmax(self.output(h.view(batch_size, -1)), dim=1)
         return self.nll_loss(y, t)
 
-    def inference(self, xs):
+    def inference(self, xs, lengths):
         _, batch_size = xs.size()
         embs = self.embed(xs)
-        hs, (h, c) = self.lstm(embs)
+        lengths = lengths.view(-1).tolist()
+        packed_embs = pack_padded_sequence(embs, lengths)
+        hs, (h, c) = self.lstm(packed_embs)
         return self.output(h.view(batch_size, -1)).max(dim=1)[1]
 
 
@@ -51,7 +58,7 @@ class LSTMJump(LSTM):
     def N(self):
         return self._N_train if self.training else self._N_test
 
-    def forward(self, xs, t):
+    def forward(self, xs, lengths, t):
         max_length, batch_size = xs.size()
         h = Variable(xs.data.new(1, batch_size, self.hidden_size).zero_().float(), requires_grad=False)
         state = (h, h)

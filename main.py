@@ -7,7 +7,7 @@ from torchtext import data
 from torchtext import datasets
 from utils import get_word2vec
 
-from model import LSTMJump
+from model import LSTMJump, LSTM
 
 
 PAD_TOKEN = '<pad>'
@@ -15,8 +15,11 @@ PAD_TOKEN = '<pad>'
 
 def parse_args():
     parser = ArgumentParser()
+    parser.add_argument('--model', type=str, default='base',
+                        choices=('base', 'jump'))
     parser.add_argument('--gpu', type=int, default=-1)
     parser.add_argument('--batch', type=int, default=50)
+    parser.add_argument('--epoch', type=int, default=500)
     parser.add_argument('--lr', type=float, default=1e-3)
     parser.add_argument('--R', type=int, default=20)
     parser.add_argument('--K', type=int, default=40)
@@ -49,7 +52,11 @@ def pick_fix_length(length):
 
 
 def main(args):
-    TEXT = data.Field(lower=True, postprocessing=pick_fix_length(400), pad_token=PAD_TOKEN)
+    if args.model == 'base':
+        postprocessing = None
+    elif args.model == 'jump':
+        postprocessing = pick_fix_length(400)
+    TEXT = data.Field(lower=True, postprocessing=postprocessing, pad_token=PAD_TOKEN, include_lengths=True)
     LABEL = data.Field(sequential=False, pad_token=None, unk_token=None)
 
     train, test = datasets.IMDB.splits(TEXT, LABEL)
@@ -58,10 +65,13 @@ def main(args):
     LABEL.build_vocab(train)
 
     train_iter, test_iter = data.BucketIterator.splits(
-        (train, test), batch_sizes=(args.batch, args.batch * 4), device=args.gpu, repeat=False)
+        (train, test), batch_sizes=(args.batch, args.batch * 4), device=args.gpu, repeat=False, sort_within_batch=True)
 
-    model = LSTMJump(len(TEXT.vocab), 300, 128, len(LABEL.vocab),
-                     args.R, args.K, args.N, 80, 8)
+    if args.model == 'base':
+        model = LSTM(len(TEXT.vocab), 300, 128, len(LABEL.vocab))
+    elif args.model == 'jump':
+        model = LSTMJump(len(TEXT.vocab), 300, 128, len(LABEL.vocab),
+                         args.R, args.K, args.N, 80, 8)
     model.load_pretrained_embedding(
         get_word2vec(TEXT.vocab.itos, '.vector_cache/GoogleNews-vectors-negative300.bin'))
     model.cuda(args.gpu)
@@ -74,7 +84,8 @@ def main(args):
         model.train()
         for batch in train_iter:
             optimizer.zero_grad()
-            loss = model(batch.text, batch.label)
+            xs, lengths = batch.text
+            loss = model(xs, lengths, batch.label)
             loss.backward()
             torch.nn.utils.clip_grad_norm(model.parameters(), 1.)
             optimizer.step()
@@ -84,7 +95,7 @@ def main(args):
         total = 0
         model.eval()
         for batch in test_iter:
-            y = model.inference(batch.text)
+            y = model.inference(*batch.text)
             sum_correct += y.eq(batch.label).sum().float()
             total += batch.label.size(0)
         accuracy = (sum_correct / total).data[0]

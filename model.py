@@ -5,18 +5,39 @@ from torch.autograd import Variable
 from torch.distributions import Categorical
 
 
-class LSTMJump(nn.Module):
-    def __init__(self, vocab_size, embed_size, hidden_size, categories,
-                 R=20, K=40, N=5, R_test=80, N_test=8):
+class LSTM(nn.Module):
+    def __init__(self, vocab_size, embed_size, hidden_size, categories):
         super().__init__()
         self.embed = nn.Embedding(vocab_size, embed_size)
         self.lstm = nn.LSTM(embed_size, hidden_size)
-        self.linear = nn.Linear(hidden_size, K + 1)
         self.output = nn.Linear(hidden_size, categories)
-        self.baseline = nn.Linear(hidden_size, 1)
         self.nll_loss = nn.NLLLoss()
-        self.mse_loss = nn.MSELoss(size_average=False)
         self.hidden_size = hidden_size
+
+    def load_pretrained_embedding(self, embedding):
+        self.embed.weight = nn.Parameter(embedding)
+
+    def forward(self, xs, t):
+        _, batch_size = xs.size()
+        embs = functional.dropout(self.embed(xs), 0.1)
+        hs, (h, c) = self.lstm(embs)
+        y = functional.log_softmax(self.output(h.view(batch_size, -1)), dim=1)
+        return self.nll_loss(y, t)
+
+    def inference(self, xs):
+        _, batch_size = xs.size()
+        embs = self.embed(xs)
+        hs, (h, c) = self.lstm(embs)
+        return self.output(h.view(batch_size, -1)).max(dim=1)[1]
+
+
+class LSTMJump(LSTM):
+    def __init__(self, vocab_size, embed_size, hidden_size, categories,
+                 R=20, K=40, N=5, R_test=80, N_test=8):
+        super().__init__(vocab_size, embed_size, hidden_size, categories)
+        self.linear = nn.Linear(hidden_size, K + 1)
+        self.baseline = nn.Linear(hidden_size, 1)
+        self.mse_loss = nn.MSELoss(size_average=False)
         self._R_train = R
         self._R_test = R_test
         self._N_train = N
@@ -29,9 +50,6 @@ class LSTMJump(nn.Module):
     @property
     def N(self):
         return self._N_train if self.training else self._N_test
-
-    def load_pretrained_embedding(self, embedding):
-        self.embed.weight = nn.Parameter(embedding)
 
     def forward(self, xs, t):
         max_length, batch_size = xs.size()

@@ -54,7 +54,7 @@ def main(args):
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
 
     max_accuracy = 0
-    for i in range(1000):
+    for i in range(args.epoch):
         print('Epoch: {}'.format(i + 1))
         sum_loss = 0
         model.train()

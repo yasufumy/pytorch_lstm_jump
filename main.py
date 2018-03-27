@@ -31,7 +31,7 @@ def main(args):
     if args.model == 'base':
         postprocessing = None
     elif args.model == 'jump':
-        postprocessing = pick_fix_length(400)
+        postprocessing = pick_fix_length(400, PAD_TOKEN)
     TEXT = data.Field(lower=True, postprocessing=postprocessing, pad_token=PAD_TOKEN, include_lengths=True)
     LABEL = data.Field(sequential=False, pad_token=None, unk_token=None)
 

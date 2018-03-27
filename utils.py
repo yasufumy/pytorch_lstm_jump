@@ -22,13 +22,13 @@ def get_word2vec(itos, path='GoogleNews-vectors-negative300.bin', cache=True):
     return vectors
 
 
-def pick_fix_length(length):
+def pick_fix_length(length, pad_token):
     import random
 
     def _pick(arr, vocab, train):
         if train:
             max_length = len(arr[0])
-            pad_id = vocab.stoi[PAD_TOKEN]
+            pad_id = vocab.stoi[pad_token]
             if max_length > length:
                 result = []
                 for ex in arr:

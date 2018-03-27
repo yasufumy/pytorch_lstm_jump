@@ -5,7 +5,7 @@ from torch import optim
 
 from torchtext import data
 from torchtext import datasets
-from utils import get_word2vec
+from utils import get_word2vec, pick_fix_length
 
 from model import LSTMJump, LSTM
 
@@ -25,30 +25,6 @@ def parse_args():
     parser.add_argument('--K', type=int, default=40)
     parser.add_argument('--N', type=int, default=5)
     return parser.parse_args()
-
-
-def pick_fix_length(length):
-    import random
-
-    def _pick(arr, vocab, train):
-        if train:
-            max_length = len(arr[0])
-            pad_id = vocab.stoi[PAD_TOKEN]
-            if max_length > length:
-                result = []
-                for ex in arr:
-                    real_length = len([x for x in ex if x != pad_id])
-                    if real_length > length:
-                        n = random.randrange(real_length - length + 1)
-                        result.append(ex[n:n + length])
-                    else:
-                        result.append(ex[:length])
-                return result
-            else:
-                return [ex + [pad_id] * (length - max_length) for ex in arr]
-        else:
-            return arr
-    return _pick
 
 
 def main(args):
@@ -90,7 +66,7 @@ def main(args):
             torch.nn.utils.clip_grad_norm(model.parameters(), 1.)
             optimizer.step()
             sum_loss += loss.data[0]
-        print('Loss: {}'.format(sum_loss / len(train_iter)))
+        print(f'Loss: {sum_loss / len(train_iter)}')
         sum_correct = 0
         total = 0
         model.eval()
@@ -100,8 +76,8 @@ def main(args):
             total += batch.label.size(0)
         accuracy = (sum_correct / total).data[0]
         max_accuracy = max(accuracy, max_accuracy)
-        print('Accuracy: {}'.format(accuracy))
-    print('Max Accuracy: {}'.format(max_accuracy))
+        print(f'Accuracy: {accuracy}')
+    print(f'Max Accuracy: {max_accuracy}')
 
 
 if __name__ == '__main__':

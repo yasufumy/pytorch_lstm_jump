@@ -67,87 +67,99 @@ class LSTMJump(LSTM):
         columns = xs.data.new(range(batch_size))
         log_probs = []
         baselines = []
+        masks = []
+        hiddens = [None] * batch_size
         last_rows = rows.clone().fill_(max_length - 1)
         for _ in range(self.N):
             for _ in range(self.R):
                 feed_previous = rows >= max_length
                 rows = feed_previous.long() * last_rows + (1 - feed_previous.long()) * rows
-                h, state = self._maybe_lstm(embs[rows, columns][None], state,
-                                            feed_previous[None, :, None].expand_as(h))
+                emb = embs[rows, columns]
+                if feed_previous.any():
+                    [setitem(hiddens, i, h[:, i, :]) for i, v in enumerate(feed_previous) if v == 1]
+                h, state = self.lstm(emb[None], state)
                 rows = rows + 1
                 if self._finish_reading(rows, max_length):
                     break
             feed_previous = rows >= max_length
             # TODO: replace where function when it is added
             rows = feed_previous.long() * last_rows + (1 - feed_previous.long()) * rows
-            h, state = self._maybe_lstm(embs[rows, columns][None], state,
-                                        feed_previous[None, :, None].expand_as(h))
+            if feed_previous.any():
+                [setitem(hiddens, i, h[:, i, :]) for i, v in enumerate(feed_previous) if v == 1]
+            h, state = self.lstm(embs[rows, columns][None], state)
             p = functional.softmax(self.linear(h.squeeze(0)), dim=1)
             m = Categorical(p)
             jump = m.sample()
             log_prob = m.log_prob(jump)
-            log_prob.data.masked_fill_(feed_previous, 0)
-            log_probs.append(log_prob)
+            log_probs.append(log_prob[:, None])
+            masks.append(feed_previous[:, None])
             baselines.append(self.baseline(h.squeeze(0)))
-            feed_previous = (jump.data == 0).long()
-            rows = feed_previous * (last_rows + 1) + (1 - feed_previous) * (rows + jump.data)
+            is_stopping = (jump.data == 0).long()
+            rows = is_stopping * (last_rows + 1) + (1 - is_stopping) * (rows + jump.data)
             if self._finish_reading(rows, max_length):
                 break
-        y = functional.log_softmax(self.output(h.squeeze(0)), dim=1)
-        reward = self._get_reward(y, t)
+        if any(x is None for x in hiddens):
+            [setitem(hiddens, i, h[:, i, :]) for i, v in enumerate(hiddens) if v is None]
+        h = torch.cat(hiddens, dim=0)
+        y = functional.log_softmax(self.output(h), dim=1)
+        log_prob = torch.cat(log_probs, dim=1)
         baseline = torch.cat(baselines, dim=1)
-        return self.nll_loss(y, t) + self._reinforce(log_probs, reward, baselines) + \
-            self.mse_loss(baseline, reward.expand_as(baseline))
+        reward = self._get_reward(y, t).expand_as(baseline)
+        # filling with 0
+        mask = torch.cat(masks, dim=1)
+        log_prob.data.masked_fill_(mask, 0)
+        baseline.data.masked_fill_(mask, 0)
+        reward.data.masked_fill_(mask, 0)
+        return self.nll_loss(y, t) + self._reinforce(log_prob, reward, baseline) + \
+            self.mse_loss(baseline, reward)
 
-    def inference(self, xs):
+    def inference(self, xs, lengths):
         max_length, batch_size = xs.size()
         h = Variable(xs.data.new(1, batch_size, self.hidden_size).zero_().float(), volatile=True)
         state = (h, h)
         embs = self.embed(xs)
         rows = xs.data.new(batch_size).zero_()
         columns = xs.data.new(range(batch_size))
+        hiddens = [None] * batch_size
         last_rows = rows.clone().fill_(max_length - 1)
         for _ in range(self.N):
             for _ in range(self.R):
                 feed_previous = rows >= max_length
                 rows = feed_previous.long() * last_rows + (1 - feed_previous.long()) * rows
-                h, state = self._maybe_lstm(embs[rows, columns][None], state,
-                                            feed_previous[None, :, None].expand_as(h))
+                emb = embs[rows, columns]
+                h, state = self.lstm(emb[None], state)
+                if feed_previous.any():
+                    [setitem(hiddens, i, h[:, i, :]) for i, v in enumerate(feed_previous) if v == 1]
                 rows = rows + 1
                 if self._finish_reading(rows, max_length):
                     break
             feed_previous = (rows >= max_length)
             # TODO: replace where function when it is added
             rows = feed_previous.long() * last_rows + (1 - feed_previous.long()) * rows
-            h, state = self._maybe_lstm(embs[rows, columns][None], state,
-                                        feed_previous[None, :, None].expand_as(h))
+            if feed_previous.any():
+                [setitem(hiddens, i, h[:, i, :]) for i, v in enumerate(feed_previous) if v == 1]
+            h, state = self.lstm(embs[rows, columns][None], state)
             p = functional.softmax(self.linear(h.squeeze(0)), dim=1)
             jump = p.max(dim=1)[1]
-            feed_previous = (jump.data == 0).long()
-            rows = feed_previous * (last_rows + 1) + (1 - feed_previous) * (rows + jump.data)
+            is_stopping = (jump.data == 0).long()
+            rows = is_stopping * (last_rows + 1) + (1 - is_stopping) * (rows + jump.data)
             if self._finish_reading(rows, max_length):
                 break
-        return self.output(h.squeeze(0)).max(dim=1)[1]
+        if any(x is None for x in hiddens):
+            [setitem(hiddens, i, h[:, i, :]) for i, v in enumerate(hiddens) if v is None]
+        h = torch.cat(hiddens, dim=0)
+        return self.output(h).max(dim=1)[1]
 
     @staticmethod
     def _finish_reading(rows, max_length):
         return (rows >= max_length).all()
 
-    def _maybe_lstm(self, x, state, mask):
-        h_new, state_new = self.lstm(x, state)
-        c = state_new[1]
-        # filling with 0
-        # h_new.data.masked_fill_(mask, 0)
-        # c.data.masked_fill_(mask, 0)
-        # feeding previous state
-        h_new.data.masked_scatter_(mask, state[0].data)
-        c.data.masked_scatter_(mask, state[1].data)
-        return h_new, (h_new, c)
+    @staticmethod
+    def _update_last_hidden(rows, max_length):
+        return (rows >= max_length).any()
 
-    def _reinforce(self, log_probs, reward, baselines):
-        if not log_probs:
-            return Variable(baselines[0].data.new(1).zero_(), requires_grad=False)
-        return torch.mean(torch.cat([- (reward - b) * l for l, b in zip(log_probs, baselines)], dim=1))
+    def _reinforce(self, log_prob, reward, baseline):
+        return - torch.mean((reward - baseline) * log_prob)
 
     def _get_reward(self, y, t):
         correct = y.data.max(dim=1)[1].eq(t.data).float()
